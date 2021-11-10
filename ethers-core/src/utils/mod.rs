@@ -25,11 +25,11 @@ pub use rlp;
 /// Re-export hex
 pub use hex;
 
-use crate::types::{Address, Bytes, U256};
+use crate::types::{Address, Bytes, U256, I256};
 use elliptic_curve::sec1::ToEncodedPoint;
 use ethabi::ethereum_types::FromDecStrErr;
 use k256::{ecdsa::SigningKey, PublicKey as K256PublicKey};
-use std::{convert::TryInto, ops::Neg};
+use std::{convert::{TryFrom, TryInto}};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -339,15 +339,13 @@ pub fn estimate_priority_fee(rewards: Vec<Vec<U256>>) -> U256 {
     let mut rewards_copy = rewards.clone();
     rewards_copy.rotate_left(1);
 
-    let mut percentage_change: Vec<i64> = rewards
+    let mut percentage_change: Vec<I256> = rewards
         .iter()
         .zip(rewards_copy.iter())
         .map(|(a, b)| {
-            if b > a {
-                ((b - a).low_u32() as i64 * 100) / (a.low_u32() as i64)
-            } else {
-                (((a - b).low_u32() as i64 * 100) / (a.low_u32() as i64)).neg()
-            }
+            let a = I256::try_from(*a).expect("priority fee overflow");
+            let b = I256::try_from(*b).expect("priority fee overflow");
+            ((b - a) * 100.into()) / a
         })
         .collect();
     percentage_change.pop();
@@ -358,8 +356,8 @@ pub fn estimate_priority_fee(rewards: Vec<Vec<U256>>) -> U256 {
 
     // If we encountered a big change in fees at a certain position, then consider only
     // the values >= it.
-    let values = if *max_change >= EIP1559_FEE_ESTIMATION_THRESHOLD_MAX_CHANGE &&
-        (max_change_index >= (rewards.len() / 2))
+    let values = if *max_change >= EIP1559_FEE_ESTIMATION_THRESHOLD_MAX_CHANGE.into()
+        && (max_change_index >= (rewards.len() / 2))
     {
         rewards[max_change_index..].to_vec()
     } else {
